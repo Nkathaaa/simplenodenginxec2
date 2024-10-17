@@ -1,0 +1,94 @@
+---
+- hosts: webservers
+  become: yes
+  vars:
+    node_apps_location: "/home/ubuntu/projects/nodebasic"
+    nginx_conf: "/etc/nginx/sites-available/default"
+  handlers:
+    - name: Restart Nginx
+      service:
+        name: nginx
+        state: restarted  
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install Node.js and npm
+      apt:
+        name:
+          - nodejs
+          - npm
+          - nginx
+        state: present
+
+    - name: Install forever globally
+      npm:
+        name: forever
+        global: yes
+        state: present    
+
+    - name: Create or ensure Node.js app directory exists
+      file:
+        path: "{{ node_apps_location }}"
+        state: directory
+        mode: '0755'
+
+    - name: Create server.js file (if not exists)
+      file:
+        path: "{{ node_apps_location }}/server.js"
+        state: touch
+        mode: '0644'
+
+    - name: Copy Node.js app server.js to the server
+      copy:
+        src: "/home/nkatha/projects/nodebasicforaws/server.js"
+        dest: "{{ node_apps_location }}/server.js"
+
+    - name: Copy package.json file to the server
+      copy:
+        src: "/home/nkatha/projects/nodebasicforaws/package.json"
+        dest: "{{ node_apps_location }}/package.json"
+
+    - name: Copy nginx conf file to the server
+      copy:
+        src: "/home/nkatha/projects/nodebasicforaws/nginx.conf"
+        dest: "{{ nginx_conf}}" 
+      notify:  
+        - Restart Nginx
+    - name: Ensure Nginx is running
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+    - name: Check current npm registry
+      command: npm config get registry
+      register: npm_registry
+
+    - name: Set npm registry to the default (npmjs.org) if needed
+      command: npm config set registry https://registry.npmjs.org/
+      when: npm_registry.stdout != "https://registry.npmjs.org/"
+
+    - name: Clean npm cache to avoid potential issues
+      command: npm cache clean --force    
+
+    - name: Install npm dependencies
+      npm:
+        path: "{{ node_apps_location }}"
+        state: present
+
+    - name: Install "testscript" Node.js package
+      npm:
+        name: typescript
+        global: yes
+        state: present 
+      ignore_errors: yes
+
+    - name: Check list of running Node.js apps using forever
+      command: forever list
+      register: forever_list
+      changed_when: false
+
+    - name: Start the Node.js app using forever
+      command: "forever start {{ node_apps_location }}/server.js"
+      when: "forever_list.stdout.find(node_apps_location + '/server.js') == -1"
